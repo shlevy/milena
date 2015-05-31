@@ -4,7 +4,7 @@ name:                milena
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             0.2.0.0
+version:             0.2.1.0
 synopsis:            A Kafka client for Haskell.
 description:         Kafka client for Haskell (not recommended for production use).
 license:             BSD3
@@ -42,7 +42,7 @@ library
                        either        >=4.3      && <4.4,
                        random        >=1.0      && <1.2,
                        transformers  >=0.3      && <0.5,
-                       lens          >=4.4      && <4.8,
+                       lens          >=4.4      && <=4.10,
                        resource-pool >=0.2.3.2  && <0.3
 
 test-suite test

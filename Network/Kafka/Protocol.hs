@@ -5,19 +5,19 @@
 
 module Network.Kafka.Protocol where
 
-import Control.Applicative (Applicative(..), Alternative(..), (<$>), (<*>))
-import Control.Category (Category(..))
+import Control.Applicative   (Applicative(..), Alternative(..), (<$>), (<*>))
+import Control.Category      (Category(..))
 import Control.Lens
-import Control.Monad (replicateM, liftM, liftM2, liftM3, liftM4, liftM5)
+import Control.Monad         (replicateM, liftM, liftM2, liftM3, liftM4, liftM5)
 import Data.ByteString.Char8 (ByteString)
-import Data.ByteString.Lens (unpackedChars)
+import Data.ByteString.Lens  (unpackedChars)
 import Data.Digest.CRC32
 import Data.Int
 import Data.Serialize.Get
 import Data.Serialize.Put
-import GHC.Exts (IsString(..))
+import GHC.Exts              (IsString(..))
 import Numeric.Lens
-import Prelude hiding ((.), id)
+import Prelude hiding        ((.), id)
 import qualified Data.ByteString.Char8 as B
 import qualified Network
 
@@ -45,6 +45,7 @@ getResponseMessage l = liftM MetadataResponse          (isolate l deserialize)
                    <|> liftM OffsetCommitResponse      (isolate l deserialize)
                    <|> liftM OffsetFetchResponse       (isolate l deserialize)
                    <|> liftM ConsumerMetadataResponse  (isolate l deserialize)
+                   <|> liftM JoinGroupResponse         (isolate l deserialize)
                    -- MUST try FetchResponse last!
                    --
                    -- As an optimization, Kafka might return a partial message
@@ -70,6 +71,7 @@ data RequestMessage = MetadataRequest MetadataRequest
                     | OffsetCommitRequest OffsetCommitRequest
                     | OffsetFetchRequest OffsetFetchRequest
                     | ConsumerMetadataRequest ConsumerMetadataRequest
+                    | JoinGroupRequest JoinGroupRequest
                     deriving (Show, Eq)
 
 newtype MetadataRequest = MetadataReq [TopicName] deriving (Show, Eq, Serializable, Deserializable)
@@ -88,6 +90,10 @@ newtype OffsetResponse =
 
 newtype PartitionOffsets =
   PartitionOffsets { _partitionOffsetsFields :: (Partition, KafkaError, [Offset]) }
+  deriving (Show, Eq, Deserializable)
+
+newtype JoinGroupResponse =
+  JoinGroupResp { _joinGroupResponseFields :: (KafkaError, GroupGenerationId, ConsumerId, [(TopicName, [Partition])]) }
   deriving (Show, Eq, Deserializable)
 
 newtype FetchResponse =
@@ -128,23 +134,15 @@ newtype ProduceRequest =
               [(TopicName, [(Partition, MessageSet)])])
   deriving (Show, Eq, Serializable)
 
-newtype RequiredAcks =
-  RequiredAcks Int16 deriving (Show, Eq, Serializable, Deserializable, Num)
-newtype Timeout =
-  Timeout Int32 deriving (Show, Eq, Serializable, Deserializable, Num)
-newtype Partition =
-  Partition Int32 deriving (Show, Ord, Eq, Serializable, Deserializable, Num)
+newtype RequiredAcks = RequiredAcks Int16 deriving (Show, Eq, Serializable, Deserializable, Num)
+newtype Timeout = Timeout Int32 deriving (Show, Eq, Serializable, Deserializable, Num)
+newtype Partition = Partition Int32 deriving (Show, Ord, Eq, Serializable, Deserializable, Num)
 
-newtype MessageSet =
-  MessageSet { _messageSetMembers :: [MessageSetMember] } deriving (Show, Eq)
-data MessageSetMember =
-  MessageSetMember { _setOffset :: Offset, _setMessage :: Message } deriving (Show, Eq)
+newtype MessageSet = MessageSet { _messageSetMembers :: [MessageSetMember] } deriving (Show, Eq)
+data MessageSetMember = MessageSetMember { _setOffset :: Offset, _setMessage :: Message } deriving (Show, Eq)
 
 newtype Offset = Offset Int64 deriving (Show, Eq, Serializable, Deserializable, Num)
-
-newtype Message =
-  Message { _messageFields :: (Crc, MagicByte, Attributes, Key, Value) }
-  deriving (Show, Eq, Deserializable)
+newtype Message = Message { _messageFields :: (Crc, MagicByte, Attributes, Key, Value) } deriving (Show, Eq, Deserializable)
 
 newtype Crc = Crc Int32 deriving (Show, Eq, Serializable, Deserializable, Num)
 newtype MagicByte = MagicByte Int8 deriving (Show, Eq, Serializable, Deserializable, Num)
@@ -160,33 +158,57 @@ data ResponseMessage = MetadataResponse MetadataResponse
                      | OffsetCommitResponse OffsetCommitResponse
                      | OffsetFetchResponse OffsetFetchResponse
                      | ConsumerMetadataResponse ConsumerMetadataResponse
+                     | JoinGroupResponse JoinGroupResponse
                      deriving (Show, Eq)
 
 newtype ConsumerMetadataRequest = ConsumerMetadataReq ConsumerGroup deriving (Show, Eq, Serializable)
 
 newtype OffsetCommitRequest = OffsetCommitReq (ConsumerGroup, [(TopicName, [(Partition, Offset, Time, Metadata)])]) deriving (Show, Eq, Serializable)
 newtype OffsetFetchRequest = OffsetFetchReq (ConsumerGroup, [(TopicName, [Partition])]) deriving (Show, Eq, Serializable)
-newtype ConsumerGroup = ConsumerGroup KafkaString deriving (Show, Eq, Serializable, Deserializable, IsString)
 newtype Metadata = Metadata KafkaString deriving (Show, Eq, Serializable, Deserializable, IsString)
 
+newtype ConsumerGroup = ConsumerGroup KafkaString deriving (Show, Eq, Serializable, Deserializable, IsString)
+newtype ConsumerId = ConsumerId KafkaString deriving (Show, Eq, Serializable, Deserializable, IsString)
+newtype JoinGroupRequest = JoinGroupReq (ConsumerGroup, Timeout, [TopicName], ConsumerId, PartitionAssignmentStrategy) deriving (Show, Eq, Serializable)
+newtype GroupGenerationId = GroupGenerationId Int32 deriving (Show, Eq, Ord, Deserializable, Num)
+
+data PartitionAssignmentStrategy = RoundRobin | Range deriving (Show, Eq)
+
+partitionStrategy :: PartitionAssignmentStrategy -> KafkaString
+partitionStrategy RoundRobin = "roundrobin"
+partitionStrategy Range      = "range"
+
+instance Serializable PartitionAssignmentStrategy where
+  serialize = serialize . partitionStrategy
+
 errorKafka :: KafkaError -> Int16
-errorKafka NoError                             = 0
-errorKafka Unknown                             = -1
-errorKafka OffsetOutOfRange                    = 1
-errorKafka InvalidMessage                      = 2
-errorKafka UnknownTopicOrPartition             = 3
-errorKafka InvalidMessageSize                  = 4
-errorKafka LeaderNotAvailable                  = 5
-errorKafka NotLeaderForPartition               = 6
-errorKafka RequestTimedOut                     = 7
-errorKafka BrokerNotAvailable                  = 8
-errorKafka ReplicaNotAvailable                 = 9
-errorKafka MessageSizeTooLarge                 = 10
-errorKafka StaleControllerEpochCode            = 11
-errorKafka OffsetMetadataTooLargeCode          = 12
-errorKafka OffsetsLoadInProgressCode           = 14
-errorKafka ConsumerCoordinatorNotAvailableCode = 15
-errorKafka NotCoordinatorForConsumerCode       = 16
+errorKafka NoError                                 = 0
+errorKafka Unknown                                 = -1
+errorKafka OffsetOutOfRange                        = 1
+errorKafka InvalidMessage                          = 2
+errorKafka UnknownTopicOrPartition                 = 3
+errorKafka InvalidMessageSize                      = 4
+errorKafka LeaderNotAvailable                      = 5
+errorKafka NotLeaderForPartition                   = 6
+errorKafka RequestTimedOut                         = 7
+errorKafka BrokerNotAvailable                      = 8
+errorKafka ReplicaNotAvailable                     = 9
+errorKafka MessageSizeTooLarge                     = 10
+errorKafka StaleControllerEpochCode                = 11
+errorKafka OffsetMetadataTooLargeCode              = 12
+errorKafka OffsetsLoadInProgressCode               = 14
+errorKafka ConsumerCoordinatorNotAvailableCode     = 15
+errorKafka NotCoordinatorForConsumerCode           = 16
+errorKafka InvalidTopicException                   = 17
+errorKafka RecordListTooLarge                      = 18
+errorKafka NotEnoughReplicas                       = 19
+errorKafka NotEnoughReplicasAfterAppend            = 20
+errorKafka InvalidRequiredAcks                     = 21
+errorKafka IllegalGeneration                       = 22
+errorKafka InconsistentPartitionAssignmentStrategy = 23
+errorKafka UnknownPartitionAssignmentStrategy      = 24
+errorKafka UnknownConsumerId                       = 25
+errorKafka InvalidSessionTimeout                   = 26
 
 data KafkaError = NoError -- ^ @0@ No error--it worked!
                 | Unknown -- ^ @-1@ An unexpected server error
@@ -205,6 +227,16 @@ data KafkaError = NoError -- ^ @0@ No error--it worked!
                 | OffsetsLoadInProgressCode -- ^ @14@ The broker returns this error code for an offset fetch request if it is still loading offsets (after a leader change for that offsets topic partition).
                 | ConsumerCoordinatorNotAvailableCode -- ^ @15@ The broker returns this error code for consumer metadata requests or offset commit requests if the offsets topic has not yet been created.
                 | NotCoordinatorForConsumerCode -- ^ @16@ The broker returns this error code if it receives an offset fetch or commit request for a consumer group that it is not a coordinator for.
+                | InvalidTopicException -- ^ @17@ The request attempted to perform an operation on an invalid topic.
+                | RecordListTooLarge -- ^ @18@ The request included message batch larger than the configured segment size on the server.
+                | NotEnoughReplicas -- ^ @19@ Messages are rejected since there are fewer in-sync replicas than required.
+                | NotEnoughReplicasAfterAppend -- ^ @20@ Messages are written to the log, but to fewer in-sync replicas than required.
+                | InvalidRequiredAcks -- ^ @21@ Produce request specified an invalid value for required acks.
+                | IllegalGeneration -- ^ @22@ The specified consumer generation id is not valid.
+                | InconsistentPartitionAssignmentStrategy -- ^ @23@ The request partition assignment strategy does not match that of the group.
+                | UnknownPartitionAssignmentStrategy -- ^ @24@ The request partition assignment strategy is unknown to the broker.
+                | UnknownConsumerId -- ^ @25@ The coordinator is not aware of this consumer.
+                | InvalidSessionTimeout -- ^ @26@ The session timeout is not within an acceptable range.
                 deriving (Eq, Show)
 
 instance Serializable KafkaError where
@@ -231,6 +263,16 @@ instance Deserializable KafkaError where
       14   -> return OffsetsLoadInProgressCode
       15   -> return ConsumerCoordinatorNotAvailableCode
       16   -> return NotCoordinatorForConsumerCode
+      17   -> return InvalidTopicException
+      18   -> return RecordListTooLarge
+      19   -> return NotEnoughReplicas
+      20   -> return NotEnoughReplicasAfterAppend
+      21   -> return InvalidRequiredAcks
+      22   -> return IllegalGeneration
+      23   -> return InconsistentPartitionAssignmentStrategy
+      24   -> return UnknownPartitionAssignmentStrategy
+      25   -> return UnknownConsumerId
+      26   -> return InvalidSessionTimeout
       _    -> fail $ "invalid error code: " ++ show x
 
 newtype Request = Request (CorrelationId, ClientId, RequestMessage) deriving (Show, Eq)
@@ -260,6 +302,7 @@ apiKey (MetadataRequest{}) = ApiKey 3
 apiKey (OffsetCommitRequest{}) = ApiKey 8
 apiKey (OffsetFetchRequest{}) = ApiKey 9
 apiKey (ConsumerMetadataRequest{}) = ApiKey 10
+apiKey (JoinGroupRequest {}) = ApiKey 11
 
 instance Serializable RequestMessage where
   serialize (ProduceRequest r) = serialize r
@@ -269,6 +312,7 @@ instance Serializable RequestMessage where
   serialize (OffsetCommitRequest r) = serialize r
   serialize (OffsetFetchRequest r) = serialize r
   serialize (ConsumerMetadataRequest r) = serialize r
+  serialize (JoinGroupRequest r) = serialize r
 
 instance Serializable Int64 where serialize = putWord64be . fromIntegral
 instance Serializable Int32 where serialize = putWord32be . fromIntegral

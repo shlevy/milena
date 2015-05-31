@@ -2,8 +2,8 @@
 
 module Main where
 
+import Data.Either            (isRight)
 import Data.Functor
-import Data.Either (isRight)
 import Network.Kafka
 import Network.Kafka.Producer
 import Network.Kafka.Protocol (Leader(..))

@@ -1,22 +1,23 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Network.Kafka where
 
 import Control.Applicative
-import Control.Exception (bracket)
+import Control.Exception     (bracket)
 import Control.Lens
-import Control.Monad (liftM)
-import Control.Monad.Trans (liftIO, lift)
+import Control.Monad         (liftM)
+import Control.Monad.Trans   (liftIO, lift)
 import Control.Monad.Trans.Either
 import Control.Monad.Trans.State
 import Data.ByteString.Char8 (ByteString)
-import Data.Monoid ((<>))
-import qualified Data.Pool as Pool
+import Data.Monoid           ((<>))
 import Data.Serialize.Get
 import System.IO
 import qualified Data.ByteString.Char8 as B
 import qualified Data.Map as M
+import qualified Data.Pool as Pool
 import qualified Network
 
 import Network.Kafka.Protocol
