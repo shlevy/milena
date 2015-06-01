@@ -461,7 +461,7 @@ makeLenses ''ProduceResponse
 
 makeLenses ''OffsetResponse
 makeLenses ''PartitionOffsets
-
+makeLenses ''JoinGroupResponse
 makeLenses ''FetchResponse
 
 makeLenses ''MetadataResponse
@@ -492,6 +492,18 @@ makePrisms ''ResponseMessage
 
 keyed :: (Field1 a a b b, Choice p, Applicative f, Eq b) => b -> Optic' p f a a
 keyed k = filtered (view $ _1 . to (== k))
+
+joinGroupError :: Lens' JoinGroupResponse KafkaError
+joinGroupError = joinGroupResponseFields . _1
+
+joinGroupGenerationId :: Lens' JoinGroupResponse GroupGenerationId
+joinGroupGenerationId = joinGroupResponseFields . _2
+
+joinGroupConsumerId :: Lens' JoinGroupResponse ConsumerId
+joinGroupConsumerId = joinGroupResponseFields . _3
+
+joinGroupPartitionInfo :: Lens' JoinGroupResponse [(TopicName, [Partition])]
+joinGroupPartitionInfo = joinGroupResponseFields . _4
 
 metadataResponseBrokers :: Lens' MetadataResponse [Broker]
 metadataResponseBrokers = metadataResponseFields . _1
