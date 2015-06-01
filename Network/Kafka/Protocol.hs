@@ -46,6 +46,7 @@ getResponseMessage l = liftM MetadataResponse          (isolate l deserialize)
                    <|> liftM OffsetFetchResponse       (isolate l deserialize)
                    <|> liftM ConsumerMetadataResponse  (isolate l deserialize)
                    <|> liftM JoinGroupResponse         (isolate l deserialize)
+                   <|> liftM HeartbeatResponse         (isolate l deserialize)
                    -- MUST try FetchResponse last!
                    --
                    -- As an optimization, Kafka might return a partial message
@@ -72,6 +73,7 @@ data RequestMessage = MetadataRequest MetadataRequest
                     | OffsetFetchRequest OffsetFetchRequest
                     | ConsumerMetadataRequest ConsumerMetadataRequest
                     | JoinGroupRequest JoinGroupRequest
+                    | HeartbeatRequest HeartbeatRequest
                     deriving (Show, Eq)
 
 newtype MetadataRequest = MetadataReq [TopicName] deriving (Show, Eq, Serializable, Deserializable)
@@ -96,6 +98,8 @@ newtype JoinGroupResponse =
   JoinGroupResp { _joinGroupResponseFields :: (KafkaError, GroupGenerationId, ConsumerId, [(TopicName, [Partition])]) }
   deriving (Show, Eq, Deserializable)
 
+newtype HeartbeatResponse = HeartbeatResp KafkaError deriving (Show, Eq, Deserializable)
+
 newtype FetchResponse =
   FetchResp { _fetchResponseFields :: [(TopicName, [(Partition, KafkaError, Offset, MessageSet)])] }
   deriving (Show, Eq, Serializable, Deserializable)
@@ -112,8 +116,8 @@ newtype Leader = Leader { _leaderId :: Maybe Int32 } deriving (Show, Eq, Ord)
 newtype Replicas = Replicas [Int32] deriving (Show, Eq, Serializable, Deserializable)
 newtype Isr = Isr [Int32] deriving (Show, Eq, Deserializable)
 
-newtype OffsetCommitResponse = OffsetCommitResp [(TopicName, [(Partition, KafkaError)])] deriving (Show, Eq, Deserializable)
-newtype OffsetFetchResponse = OffsetFetchResp [(TopicName, [(Partition, Offset, Metadata, KafkaError)])] deriving (Show, Eq, Deserializable)
+newtype OffsetCommitResponse = OffsetCommitResp { _offsetCommitResponseFields :: [(TopicName, [(Partition, KafkaError)])] } deriving (Show, Eq, Deserializable)
+newtype OffsetFetchResponse = OffsetFetchResp { _offsetFetchResponseFields :: [(TopicName, [(Partition, Offset, Metadata, KafkaError)])] }  deriving (Show, Eq, Deserializable)
 
 newtype OffsetRequest = OffsetReq (ReplicaId, [(TopicName, [(Partition, Time, MaxNumberOfOffsets)])]) deriving (Show, Eq, Serializable)
 newtype Time = Time { _timeInt :: Int64 } deriving (Show, Eq, Serializable, Num, Bounded)
@@ -159,6 +163,7 @@ data ResponseMessage = MetadataResponse MetadataResponse
                      | OffsetFetchResponse OffsetFetchResponse
                      | ConsumerMetadataResponse ConsumerMetadataResponse
                      | JoinGroupResponse JoinGroupResponse
+                     | HeartbeatResponse HeartbeatResponse
                      deriving (Show, Eq)
 
 newtype ConsumerMetadataRequest = ConsumerMetadataReq ConsumerGroup deriving (Show, Eq, Serializable)
@@ -170,7 +175,9 @@ newtype Metadata = Metadata KafkaString deriving (Show, Eq, Serializable, Deseri
 newtype ConsumerGroup = ConsumerGroup KafkaString deriving (Show, Eq, Serializable, Deserializable, IsString)
 newtype ConsumerId = ConsumerId KafkaString deriving (Show, Eq, Serializable, Deserializable, IsString)
 newtype JoinGroupRequest = JoinGroupReq (ConsumerGroup, Timeout, [TopicName], ConsumerId, PartitionAssignmentStrategy) deriving (Show, Eq, Serializable)
-newtype GroupGenerationId = GroupGenerationId Int32 deriving (Show, Eq, Ord, Deserializable, Num)
+newtype GroupGenerationId = GroupGenerationId Int32 deriving (Show, Eq, Ord, Serializable, Deserializable, Num)
+
+newtype HeartbeatRequest = HearbeatReq (ConsumerGroup, GroupGenerationId, ConsumerId) deriving (Show, Eq, Serializable)
 
 data PartitionAssignmentStrategy = RoundRobin | Range deriving (Show, Eq)
 
@@ -303,6 +310,7 @@ apiKey (OffsetCommitRequest{}) = ApiKey 8
 apiKey (OffsetFetchRequest{}) = ApiKey 9
 apiKey (ConsumerMetadataRequest{}) = ApiKey 10
 apiKey (JoinGroupRequest {}) = ApiKey 11
+apiKey (HeartbeatRequest {}) = ApiKey 12
 
 instance Serializable RequestMessage where
   serialize (ProduceRequest r) = serialize r
@@ -313,6 +321,7 @@ instance Serializable RequestMessage where
   serialize (OffsetFetchRequest r) = serialize r
   serialize (ConsumerMetadataRequest r) = serialize r
   serialize (JoinGroupRequest r) = serialize r
+  serialize (HeartbeatRequest r) = serialize r
 
 instance Serializable Int64 where serialize = putWord64be . fromIntegral
 instance Serializable Int32 where serialize = putWord32be . fromIntegral
@@ -462,6 +471,8 @@ makeLenses ''ProduceResponse
 makeLenses ''OffsetResponse
 makeLenses ''PartitionOffsets
 makeLenses ''JoinGroupResponse
+makeLenses ''OffsetCommitResponse
+makeLenses ''OffsetFetchResponse
 makeLenses ''FetchResponse
 
 makeLenses ''MetadataResponse
