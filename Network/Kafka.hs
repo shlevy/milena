@@ -43,14 +43,18 @@ data KafkaState = KafkaState { -- | Name to use as a client ID.
                              , _stateTopicMetadata :: M.Map TopicName TopicMetadata
                                -- | Consumer Group
                              , _stateConsumerGroup :: ConsumerGroup
+                               -- | Consumer Topics
+                             , _stateConsumerTopics :: [TopicName]
                                -- | Consumer metadata
                              , _stateConsumerCoordinator :: Maybe Broker
                                -- | Consumer group generation id
-                             , __stateGroupGenerationId :: Maybe GroupGenerationId
+                             , _stateGroupGenerationId :: Maybe GroupGenerationId
                                -- | Consumer id
-                             , __stateConsumerId :: Maybe ConsumerId
+                             , _stateConsumerId :: Maybe ConsumerId
                                -- | Consumer Partitions
-                             , __stateConsumerPartitions :: [Partition]
+                             , _stateConsumerPartitions :: M.Map TopicName [Partition]
+                               -- | Consumer partition offsets
+                             , _statePartitionOffsets :: M.Map TopicName [(Partition, Offset)]
                              } deriving (Show)
 
 makeLenses ''KafkaState
@@ -148,6 +152,10 @@ defaultMaxWaitTime = 0
 defaultConsumerGroup :: ConsumerGroup
 defaultConsumerGroup = ""
 
+-- | Default: @""@
+defaultConsumerTopics :: [TopicName]
+defaultConsumerTopics = []
+
 -- | Default: @Nothing@
 defaultConsumerCoordinator :: Maybe Broker
 defaultConsumerCoordinator = Nothing
@@ -161,8 +169,11 @@ defaultConsumerId :: Maybe ConsumerId
 defaultConsumerId = Nothing
 
 -- | Default: @[]@
-defaultConsumerPartitions :: [Partition]
-defaultConsumerPartitions = []
+defaultConsumerPartitions :: M.Map TopicName [Partition]
+defaultConsumerPartitions = M.empty
+
+defaultPartitionOffsets :: M.Map TopicName [(Partition, Offset)]
+defaultPartitionOffsets = M.empty
 
 -- | Create a consumer using default values.
 defaultState :: KafkaClientId -> KafkaState
@@ -178,10 +189,12 @@ defaultState cid =
                M.empty
                M.empty
                defaultConsumerGroup
+               defaultConsumerTopics
                defaultConsumerCoordinator
                defaultGroupGenerationId
                defaultConsumerId
                defaultConsumerPartitions
+               defaultPartitionOffsets
 
 -- | Run the underlying Kafka monad at the given leader address and initial state.
 runKafka :: KafkaAddress -> KafkaState -> Kafka a -> IO (Either KafkaClientError a)
