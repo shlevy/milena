@@ -177,7 +177,7 @@ newtype ConsumerId = ConsumerId KafkaString deriving (Show, Eq, Serializable, De
 newtype JoinGroupRequest = JoinGroupReq (ConsumerGroup, Timeout, [TopicName], ConsumerId, PartitionAssignmentStrategy) deriving (Show, Eq, Serializable)
 newtype GroupGenerationId = GroupGenerationId Int32 deriving (Show, Eq, Ord, Serializable, Deserializable, Num)
 
-newtype HeartbeatRequest = HearbeatReq (ConsumerGroup, GroupGenerationId, ConsumerId) deriving (Show, Eq, Serializable)
+newtype HeartbeatRequest = HeartbeatReq (ConsumerGroup, GroupGenerationId, ConsumerId) deriving (Show, Eq, Serializable)
 
 data PartitionAssignmentStrategy = RoundRobin | Range deriving (Show, Eq)
 
