@@ -8,16 +8,26 @@ import Network.Kafka
 import Network.Kafka.Protocol
 import qualified Data.Map as M
 
-
+-- | Acquire metadata for the state's consumer group
 consumerMetadataReq :: Kafka Response
 consumerMetadataReq = do
   cg  <- use (kafkaClientState . stateConsumerGroup)
   req <- makeRequest $ ConsumerMetadataRequest $ ConsumerMetadataReq cg
   doRequest req
 
-metadataForTopics :: [TopicName] -> Kafka MetadataResponse
-metadataForTopics xs = metadata $ MetadataReq xs
+updateConsumerMetadata :: ResponseMessage -> Kafka ()
+updateConsumerMetadata (ConsumerMetadataResponse
+                         (ConsumerMetadataResp (err, b))
+                       ) | err == NoError = updateConsumerCoordinator b
+                         | otherwise      = return ()
+updateConsumerMetadata _                  = return ()
 
+updateConsumerCoordinator :: Broker -> Kafka ()
+updateConsumerCoordinator b = do
+  (kafkaClientState . stateConsumerCoordinator) .= Just b
+  return ()
+
+-- | Join consumer group with given partition strategy
 joinGroupReq :: PartitionAssignmentStrategy
              -- | Timeout in ms (>=6000 && <= 30000) after current time for lifetime of consumer
              -> Timeout
@@ -37,13 +47,15 @@ updateGroupInfo _                                    = return ()
 noErrorJGR :: JoinGroupResponse -> Bool
 noErrorJGR r = r ^. joinGroupError == NoError
 
+-- | Update state consumer group information
 updateGroupInfo' :: JoinGroupResponse -> Kafka ()
 updateGroupInfo' r = do
-  kafkaClientState . stateGroupGenerationId %= \_ -> Just $ r ^. joinGroupGenerationId
-  kafkaClientState . stateConsumerPartitions %= \_ -> M.fromList $ r ^. joinGroupPartitionInfo
-  kafkaClientState . stateConsumerId %= \_ -> Just $ r ^. joinGroupConsumerId
+  kafkaClientState . stateGroupGenerationId .= (Just $ r ^. joinGroupGenerationId)
+  kafkaClientState . stateConsumerPartitions .= (M.fromList $ r ^. joinGroupPartitionInfo)
+  kafkaClientState . stateConsumerId .= (Just $ r ^. joinGroupConsumerId)
   return ()
 
+-- | Retrieve offsets for all assigned partitions (by their topics)
 fetchOffsets :: Kafka Response
 fetchOffsets = do
   cg         <- use (kafkaClientState . stateConsumerGroup)
@@ -51,6 +63,7 @@ fetchOffsets = do
   req        <- makeRequest $ OffsetFetchRequest $ OffsetFetchReq (cg, M.toList partitions)
   doRequest req
 
+-- | Update state offsets if successful OffsetFetchResponse received
 updateOffsetsInfo :: ResponseMessage -> Kafka ()
 updateOffsetsInfo (OffsetFetchResponse r) = updateOffsets r
 updateOffsetsInfo _                       = return ()
@@ -68,6 +81,7 @@ filterErrorOFI r = (r ^. _1, filterOk  (r ^. _2))
   where filterOk xs = (\t -> (t ^. _1, t ^. _2)) <$> filter notKafkaError xs
         notKafkaError x = (x ^. _4) == NoError
 
+-- | Commit offsets (no KafkaState update)
 commitOffsets :: [(TopicName, [(Partition, Offset)])]
               -> Time
               -> Metadata
@@ -78,3 +92,12 @@ commitOffsets offsets time metad = do
   doRequest req
     where addTimeAndMetadata t = (t ^. _1, addTupleVals <$> t ^. _2)
           addTupleVals t = (t ^. _1, t ^. _2, time, metad)
+
+-- | Initialize partitions at (Offset 0) if never polled
+bootstrapOffsets :: a -> a
+bootstrapOffsets = undefined
+
+
+-- | Acquire metadata for input topics
+metadataForTopics :: [TopicName] -> Kafka MetadataResponse
+metadataForTopics xs = metadata $ MetadataReq xs
