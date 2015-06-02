@@ -52,7 +52,7 @@ fetchOffsets = do
   doRequest req
 
 updateOffsetsInfo :: ResponseMessage -> Kafka ()
-updateOffsetsInfo (OffsetFetchResponse r) = updateOffsets
+updateOffsetsInfo (OffsetFetchResponse r) = updateOffsets r
 updateOffsetsInfo _                       = return ()
 
 updateOffsets :: OffsetFetchResponse -> Kafka ()
@@ -67,3 +67,14 @@ filterErrorOFI :: (TopicName, [(Partition, Offset, Metadata, KafkaError)])
 filterErrorOFI r = (r ^. _1, filterOk  (r ^. _2))
   where filterOk xs = (\t -> (t ^. _1, t ^. _2)) <$> filter notKafkaError xs
         notKafkaError x = (x ^. _4) == NoError
+
+commitOffsets :: [(TopicName, [(Partition, Offset)])]
+              -> Time
+              -> Metadata
+              -> Kafka Response
+commitOffsets offsets time metad = do
+  cg  <- use (kafkaClientState . stateConsumerGroup)
+  req <- makeRequest $ OffsetCommitRequest $ OffsetCommitReq (cg, addTimeAndMetadata <$> offsets)
+  doRequest req
+    where addTimeAndMetadata t = (t ^. _1, addTupleVals <$> t ^. _2)
+          addTupleVals t = (t ^. _1, t ^. _2, time, metad)
