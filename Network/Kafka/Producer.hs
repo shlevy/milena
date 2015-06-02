@@ -1,6 +1,5 @@
 module Network.Kafka.Producer where
 
-import Control.Applicative
 import Control.Lens
 import Control.Monad.Trans   (liftIO, lift)
 import Control.Monad.Trans.Either

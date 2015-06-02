@@ -4,7 +4,6 @@
 
 module Network.Kafka where
 
-import Control.Applicative
 import Control.Exception     (bracket)
 import Control.Lens
 import Control.Monad         (liftM)
@@ -42,7 +41,17 @@ data KafkaState = KafkaState { -- | Name to use as a client ID.
                              , _stateConnections :: M.Map Broker (Pool.Pool Handle)
                                -- | Topic metadata cache
                              , _stateTopicMetadata :: M.Map TopicName TopicMetadata
-                             }
+                               -- | Consumer Group
+                             , _stateConsumerGroup :: ConsumerGroup
+                               -- | Consumer metadata
+                             , _stateConsumerCoordinator :: Maybe Broker
+                               -- | Consumer group generation id
+                             , __stateGroupGenerationId :: Maybe GroupGenerationId
+                               -- | Consumer id
+                             , __stateConsumerId :: Maybe ConsumerId
+                               -- | Consumer Partitions
+                             , __stateConsumerPartitions :: [Partition]
+                             } deriving (Show)
 
 makeLenses ''KafkaState
 
@@ -135,6 +144,26 @@ defaultMaxBytes = 1024 * 1024
 defaultMaxWaitTime :: MaxWaitTime
 defaultMaxWaitTime = 0
 
+-- | Default: @""@
+defaultConsumerGroup :: ConsumerGroup
+defaultConsumerGroup = ""
+
+-- | Default: @Nothing@
+defaultConsumerCoordinator :: Maybe Broker
+defaultConsumerCoordinator = Nothing
+
+-- | Default: @Nothing@
+defaultGroupGenerationId :: Maybe GroupGenerationId
+defaultGroupGenerationId = Nothing
+
+-- | Default: @Nothing@
+defaultConsumerId :: Maybe ConsumerId
+defaultConsumerId = Nothing
+
+-- | Default: @[]@
+defaultConsumerPartitions :: [Partition]
+defaultConsumerPartitions = []
+
 -- | Create a consumer using default values.
 defaultState :: KafkaClientId -> KafkaState
 defaultState cid =
@@ -148,6 +177,11 @@ defaultState cid =
                M.empty
                M.empty
                M.empty
+               defaultConsumerGroup
+               defaultConsumerCoordinator
+               defaultGroupGenerationId
+               defaultConsumerId
+               defaultConsumerPartitions
 
 -- | Run the underlying Kafka monad at the given leader address and initial state.
 runKafka :: KafkaAddress -> KafkaState -> Kafka a -> IO (Either KafkaClientError a)
