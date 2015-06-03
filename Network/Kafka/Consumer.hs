@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 
 -- |
@@ -24,9 +25,11 @@
 
 module Network.Kafka.Consumer where
 
+import Control.Arrow ((***))
 import Control.Lens
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Either
+import Data.List           (partition)
 import Network.Kafka
 import Network.Kafka.Protocol
 import qualified Data.Map as M
@@ -41,6 +44,10 @@ initializeConsumer strategy timeout topics = do
   consumerMetadataReq >>= updateConsumerMetadata
   (kafkaClientState . stateConsumerTopics) .= topics
   joinGroupReq strategy timeout >>= updateGroupInfo . view responseMessage
+  offsets <- fetchOffsets -- first time will return offset response with unknown topic or partition ... then bootstrap
+  newPartitions <- updateOffsetsInfo $ view responseMessage offsets -- update with ok partitions, return the new partitions
+  bootstrapOffsets 0 "" newPartitions -- bootstrap partitions without an offset at 0
+  return ()
 
 -- | Execute a Kafka Request with a given broker
 useBroker :: Broker -> Kafka Request -> Kafka Response
@@ -101,26 +108,35 @@ fetchOffsets :: Kafka Response
 fetchOffsets = do
   cg         <- use (kafkaClientState . stateConsumerGroup)
   partitions <- use (kafkaClientState . stateConsumerPartitions)
-  req        <- makeRequest $ OffsetFetchRequest $ OffsetFetchReq (cg, M.toList partitions)
-  doRequest req
+  coordinator <- use (kafkaClientState . stateConsumerCoordinator)
+  case coordinator of
+    (Just b) -> useBroker b $ makeRequest $ OffsetFetchRequest $ OffsetFetchReq (cg, M.toList partitions)
+    Nothing  -> lift $ left KafkaNoConsumerCoordinator
 
 -- | Update state offsets if successful OffsetFetchResponse received
-updateOffsetsInfo :: ResponseMessage -> Kafka ()
+updateOffsetsInfo :: ResponseMessage -> Kafka [(TopicName, [(Partition, Offset)])]
 updateOffsetsInfo (OffsetFetchResponse r) = updateOffsets r
-updateOffsetsInfo _                       = return ()
+updateOffsetsInfo _                       = return []
 
-updateOffsets :: OffsetFetchResponse -> Kafka ()
+-- | Update state's offsets for ok partitions - returning new partitions
+updateOffsets :: OffsetFetchResponse -> Kafka [(TopicName, [(Partition, Offset)])]
 updateOffsets r = do
-  let updates = filterErrorOFI <$> r ^. offsetFetchResponseFields
-  kafkaClientState . statePartitionOffsets %= \m -> foldr addOffset m updates
-  return ()
+  let allOffsets = splitOffsetResponse <$> r ^. offsetFetchResponseFields
+  let okPartitions = selectOk <$> allOffsets
+  let newPartitions = selectNew <$> allOffsets
+  kafkaClientState . statePartitionOffsets %= \m -> foldr addOffset m okPartitions
+  return newPartitions
     where addOffset t = M.insert (t ^. _1) (t ^. _2)
+          selectOk = (id) *** (view _1)
+          selectNew = (id) *** (view _2)
 
-filterErrorOFI :: (TopicName, [(Partition, Offset, Metadata, KafkaError)])
-               -> (TopicName, [(Partition, Offset)])
-filterErrorOFI r = (r ^. _1, filterOk  (r ^. _2))
-  where filterOk xs = (\t -> (t ^. _1, t ^. _2)) <$> filter notKafkaError xs
+splitOffsetResponse :: (TopicName, [(Partition, Offset, Metadata, KafkaError)])
+                    -> (TopicName, ([(Partition, Offset)], [(Partition, Offset)]))
+splitOffsetResponse r = (r ^. _1, mapSelect $ filterOk (r ^. _2))
+  where filterOk xs = partition notKafkaError xs
         notKafkaError x = (x ^. _4) == NoError
+        selectFirstTwo t = (t ^. _1, t ^. _2)
+        mapSelect = (fmap selectFirstTwo) *** (fmap selectFirstTwo)
 
 -- | Commit offsets (no KafkaState update)
 commitOffsets :: [(TopicName, [(Partition, Offset)])]
@@ -128,18 +144,23 @@ commitOffsets :: [(TopicName, [(Partition, Offset)])]
               -> Metadata
               -> Kafka Response
 commitOffsets offsets time metad = do
-  cg  <- use (kafkaClientState . stateConsumerGroup)
-  req <- makeRequest $ OffsetCommitRequest $ OffsetCommitReq (cg, addTimeAndMetadata <$> offsets)
-  doRequest req
+  cg          <- use (kafkaClientState . stateConsumerGroup)
+  coordinator <- use (kafkaClientState . stateConsumerCoordinator)
+  case coordinator of
+      (Just b) -> useBroker b $  makeRequest $ OffsetCommitRequest $ OffsetCommitReq (cg, addTimeAndMetadata <$> offsets)
+      Nothing  -> lift $ left KafkaNoConsumerCoordinator
     where addTimeAndMetadata t = (t ^. _1, addTupleVals <$> t ^. _2)
           addTupleVals t = (t ^. _1, t ^. _2, time, metad)
 
--- | Initialize all partitions at (Offset 0)
-bootstrapOffsets :: Kafka Response
-bootstrapOffsets = do
-  assignedPartitions <- use (kafkaClientState . stateConsumerPartitions)
-  let partitionsList = mapZero $ M.toList assignedPartitions
-  commitOffsets partitionsList 0 "Init offsets"
+-- | Commit input partitions to (Offset 0)
+bootstrapOffsets :: Time
+                 -> Metadata
+                 -> [(TopicName, [(Partition, Offset)])]
+                 -> Kafka Response
+bootstrapOffsets t m partitionsToSet = do
+  let partitionsList = mapZero partitionsToSet
+  commitOffsets partitionsList t m
     where mapZero xs = pairZero <$> xs
-          offsetZero ys = (, Offset 0) <$> ys
+          offsetZero ys = setZero <$> ys
           pairZero (topic, partitions) = (topic, offsetZero partitions)
+          setZero = (id) *** (\_ -> Offset 0)
