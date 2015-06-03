@@ -34,8 +34,7 @@ import qualified Data.Map as M
 initializeConsumption :: [TopicName] -> Kafka Response
 initializeConsumption topics = do
   updateMetadatas topics
-  cm <- consumerMetadataReq
-  updateConsumerMetadata $ cm ^. responseMessage
+  consumerMetadataReq >>= updateConsumerMetadata
   (kafkaClientState . stateConsumerTopics) .= topics
   joinGroupReq Range 29999
 
@@ -45,18 +44,18 @@ useBroker b fn = do
   withBrokerHandle b $ \handle -> (fn >>= doRequest' handle)
 
 -- | Acquire metadata for the state's consumer group
-consumerMetadataReq :: Kafka Response
+consumerMetadataReq :: Kafka ResponseMessage
 consumerMetadataReq = do
   cg  <- use (kafkaClientState . stateConsumerGroup)
   req <- makeRequest $ ConsumerMetadataRequest $ ConsumerMetadataReq cg
-  doRequest req
+  view responseMessage <$> doRequest req
 
--- | Update state consumer coordinator if valid consumer metadata response
+-- | Update state consumer coordinator if valid consumer metadata response - retry until response ok.
 updateConsumerMetadata :: ResponseMessage -> Kafka ()
 updateConsumerMetadata (ConsumerMetadataResponse
                          (ConsumerMetadataResp (err, b))
                        ) | err == NoError = updateConsumerCoordinator b
-                         | otherwise      = return ()
+                         | otherwise      = consumerMetadataReq >>= updateConsumerMetadata
 updateConsumerMetadata _                  = return ()
 
 updateConsumerCoordinator :: Broker -> Kafka ()
