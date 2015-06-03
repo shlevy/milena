@@ -81,6 +81,8 @@ data KafkaClientError = -- | A response did not contain an offset.
                         -- | Could not find a cached broker for the found leader.
                       | KafkaInvalidBroker Leader
                       | KafkaFailedToFetchMetadata
+                        -- | The consumer coordinator for the state's consumer group is not yet assigned
+                      | KafkaNoConsumerCoordinator
                         deriving (Eq, Show)
 
 -- | Type of response to expect, used for 'KafkaExpected' error.
@@ -150,7 +152,7 @@ defaultMaxWaitTime = 0
 
 -- | Default: @""@
 defaultConsumerGroup :: ConsumerGroup
-defaultConsumerGroup = ""
+defaultConsumerGroup = "defaultGroup"
 
 -- | Default: @""@
 defaultConsumerTopics :: [TopicName]
@@ -306,7 +308,6 @@ withBrokerHandle broker f = do
             let h = b ^. brokerHost ^. hostString
                 p = b ^. brokerPort ^. portId
             Network.connectTo h p
-
 
 
 -- * Offsets
