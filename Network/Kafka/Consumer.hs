@@ -20,7 +20,7 @@
 --
 -- == /Iterative streaming:/
 --
--- Using the Kafak monad.
+-- Using the Kafka monad.
 
 module Network.Kafka.Consumer where
 
@@ -31,12 +31,16 @@ import Network.Kafka
 import Network.Kafka.Protocol
 import qualified Data.Map as M
 
-initializeConsumption :: [TopicName] -> Kafka Response
-initializeConsumption topics = do
+-- | Initialize the consumer (i.e. join group)
+initializeConsumer :: PartitionAssignmentStrategy
+                   -> Timeout
+                   -> [TopicName]
+                   -> Kafka ()
+initializeConsumer strategy timeout topics = do
   updateMetadatas topics
   consumerMetadataReq >>= updateConsumerMetadata
   (kafkaClientState . stateConsumerTopics) .= topics
-  joinGroupReq Range 29999
+  joinGroupReq strategy timeout >>= updateGroupInfo . view responseMessage
 
 -- | Execute a Kafka Request with a given broker
 useBroker :: Broker -> Kafka Request -> Kafka Response
