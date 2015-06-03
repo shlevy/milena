@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections #-}
 
 module Network.Kafka.Consumer where
 
@@ -15,6 +16,7 @@ consumerMetadataReq = do
   req <- makeRequest $ ConsumerMetadataRequest $ ConsumerMetadataReq cg
   doRequest req
 
+-- | Update state consumer coordinator if valid consumer metadata response
 updateConsumerMetadata :: ResponseMessage -> Kafka ()
 updateConsumerMetadata (ConsumerMetadataResponse
                          (ConsumerMetadataResp (err, b))
@@ -93,10 +95,15 @@ commitOffsets offsets time metad = do
     where addTimeAndMetadata t = (t ^. _1, addTupleVals <$> t ^. _2)
           addTupleVals t = (t ^. _1, t ^. _2, time, metad)
 
--- | Initialize partitions at (Offset 0) if never polled
-bootstrapOffsets :: a -> a
-bootstrapOffsets = undefined
-
+-- | Initialize all partitions at (Offset 0)
+bootstrapOffsets :: Kafka Response
+bootstrapOffsets = do
+  assignedPartitions <- use (kafkaClientState . stateConsumerPartitions)
+  let partitionsList = mapZero $ M.toList assignedPartitions
+  commitOffsets partitionsList 0 "Init offsets"
+    where mapZero xs = pairZero <$> xs
+          offsetZero ys = (, Offset 0) <$> ys
+          pairZero (topic, partitions) = (topic, offsetZero partitions)
 
 -- | Acquire metadata for input topics
 metadataForTopics :: [TopicName] -> Kafka MetadataResponse
