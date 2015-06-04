@@ -43,7 +43,10 @@ initializeConsumer strategy timeout topics = do
   updateMetadatas topics
   consumerMetadataReq >>= updateConsumerMetadata
   (kafkaClientState . stateConsumerTopics) .= topics
-  joinGroupReq strategy timeout >>= updateGroupInfo . view responseMessage
+  consId <- use (kafkaClientState . stateConsumerId)
+  _ <- case consId of
+         Just (_) -> return ()
+         Nothing  -> joinGroupReq strategy timeout >>= updateGroupInfo . view responseMessage -- join if ConsumerId = Nothing, otherwise we've already joined
   offsets <- fetchOffsets -- first time will return offset response with unknown topic or partition ... then bootstrap
   newPartitions <- updateOffsetsInfo $ view responseMessage offsets -- update with ok partitions, return the new partitions
   _ <- bootstrapOffsets 0 "" newPartitions -- bootstrap partitions without an offset at 0
