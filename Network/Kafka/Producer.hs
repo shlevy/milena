@@ -1,14 +1,13 @@
 module Network.Kafka.Producer where
 
-import Control.Applicative
 import Control.Lens
-import Control.Monad.Trans (liftIO, lift)
+import Control.Monad.Trans   (liftIO, lift)
 import Control.Monad.Trans.Either
 import Data.ByteString.Char8 (ByteString)
-import Data.Monoid ((<>))
+import Data.Monoid           ((<>))
 import System.IO
+import System.Random         (getStdRandom, randomR)
 import qualified Data.Map as M
-import System.Random (getStdRandom, randomR)
 
 import Network.Kafka
 import Network.Kafka.Protocol

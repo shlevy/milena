@@ -4,20 +4,19 @@
 
 module Network.Kafka where
 
-import Control.Applicative
-import Control.Exception (bracket)
+import Control.Exception     (bracket)
 import Control.Lens
-import Control.Monad (liftM)
-import Control.Monad.Trans (liftIO, lift)
+import Control.Monad         (liftM)
+import Control.Monad.Trans   (liftIO, lift)
 import Control.Monad.Trans.Either
 import Control.Monad.Trans.State
 import Data.ByteString.Char8 (ByteString)
-import Data.Monoid ((<>))
-import qualified Data.Pool as Pool
+import Data.Monoid           ((<>))
 import Data.Serialize.Get
 import System.IO
 import qualified Data.ByteString.Char8 as B
 import qualified Data.Map as M
+import qualified Data.Pool as Pool
 import qualified Network
 
 import Network.Kafka.Protocol
@@ -42,7 +41,21 @@ data KafkaState = KafkaState { -- | Name to use as a client ID.
                              , _stateConnections :: M.Map Broker (Pool.Pool Handle)
                                -- | Topic metadata cache
                              , _stateTopicMetadata :: M.Map TopicName TopicMetadata
-                             }
+                               -- | Consumer Group
+                             , _stateConsumerGroup :: ConsumerGroup
+                               -- | Consumer Topics
+                             , _stateConsumerTopics :: [TopicName]
+                               -- | Consumer metadata
+                             , _stateConsumerCoordinator :: Maybe Broker
+                               -- | Consumer group generation id
+                             , _stateGroupGenerationId :: Maybe GroupGenerationId
+                               -- | Consumer id
+                             , _stateConsumerId :: Maybe ConsumerId
+                               -- | Consumer Partitions
+                             , _stateConsumerPartitions :: M.Map TopicName [Partition]
+                               -- | Consumer partition offsets
+                             , _statePartitionOffsets :: M.Map TopicName [(Partition, Offset)]
+                             } deriving (Show)
 
 makeLenses ''KafkaState
 
@@ -68,6 +81,8 @@ data KafkaClientError = -- | A response did not contain an offset.
                         -- | Could not find a cached broker for the found leader.
                       | KafkaInvalidBroker Leader
                       | KafkaFailedToFetchMetadata
+                        -- | The consumer coordinator for the state's consumer group is not yet assigned
+                      | KafkaNoConsumerCoordinator
                         deriving (Eq, Show)
 
 -- | Type of response to expect, used for 'KafkaExpected' error.
@@ -135,6 +150,33 @@ defaultMaxBytes = 1024 * 1024
 defaultMaxWaitTime :: MaxWaitTime
 defaultMaxWaitTime = 0
 
+-- | Default: @""@
+defaultConsumerGroup :: ConsumerGroup
+defaultConsumerGroup = "defaultGroup"
+
+-- | Default: @""@
+defaultConsumerTopics :: [TopicName]
+defaultConsumerTopics = []
+
+-- | Default: @Nothing@
+defaultConsumerCoordinator :: Maybe Broker
+defaultConsumerCoordinator = Nothing
+
+-- | Default: @Nothing@
+defaultGroupGenerationId :: Maybe GroupGenerationId
+defaultGroupGenerationId = Nothing
+
+-- | Default: @Nothing@
+defaultConsumerId :: Maybe ConsumerId
+defaultConsumerId = Nothing
+
+-- | Default: @[]@
+defaultConsumerPartitions :: M.Map TopicName [Partition]
+defaultConsumerPartitions = M.empty
+
+defaultPartitionOffsets :: M.Map TopicName [(Partition, Offset)]
+defaultPartitionOffsets = M.empty
+
 -- | Create a consumer using default values.
 defaultState :: KafkaClientId -> KafkaState
 defaultState cid =
@@ -148,6 +190,13 @@ defaultState cid =
                M.empty
                M.empty
                M.empty
+               defaultConsumerGroup
+               defaultConsumerTopics
+               defaultConsumerCoordinator
+               defaultGroupGenerationId
+               defaultConsumerId
+               defaultConsumerPartitions
+               defaultPartitionOffsets
 
 -- | Run the underlying Kafka monad at the given leader address and initial state.
 runKafka :: KafkaAddress -> KafkaState -> Kafka a -> IO (Either KafkaClientError a)
@@ -259,7 +308,6 @@ withBrokerHandle broker f = do
             let h = b ^. brokerHost ^. hostString
                 p = b ^. brokerPort ^. portId
             Network.connectTo h p
-
 
 
 -- * Offsets
