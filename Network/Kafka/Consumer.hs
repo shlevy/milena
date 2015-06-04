@@ -54,7 +54,7 @@ initializeConsumer strategy timeout topics = do
   return ()
 
 -- | Stream from all assigned partitions -> outputs all polled partitions
-fetchAllPartitions :: Kafka Response
+fetchAllPartitions :: Kafka FetchResponse
 fetchAllPartitions = do
   _ <- sendHeartbeat
   wt <- use (kafkaClientState . stateWaitTime)
@@ -64,7 +64,9 @@ fetchAllPartitions = do
   let addBuffer (p, o) = (p, o, bs)
   let mapBuffers xs = addBuffer <$> xs
   let includingBuffers = (\t -> (t ^. _1, mapBuffers $ t ^. _2)) <$> M.toList allPartitions
-  doRequest =<< (makeRequest $ FetchRequest $ FetchReq (ordinaryConsumerId, wt, ws, includingBuffers))
+  req <- makeRequest $ FetchRequest $ FetchReq (ordinaryConsumerId, wt, ws, includingBuffers)
+  resp <- doRequest req
+  expectResponse ExpectedFetch _FetchResponse resp
 
 -- | Extract the responses from fetch and commit new offsets
 handleFetchResponse :: FetchResponse -> Kafka [MessageSet]
