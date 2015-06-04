@@ -46,8 +46,21 @@ initializeConsumer strategy timeout topics = do
   joinGroupReq strategy timeout >>= updateGroupInfo . view responseMessage
   offsets <- fetchOffsets -- first time will return offset response with unknown topic or partition ... then bootstrap
   newPartitions <- updateOffsetsInfo $ view responseMessage offsets -- update with ok partitions, return the new partitions
-  bootstrapOffsets 0 "" newPartitions -- bootstrap partitions without an offset at 0
+  _ <- bootstrapOffsets 0 "" newPartitions -- bootstrap partitions without an offset at 0
   return ()
+
+-- | Stream from all assigned partitions -> outputs all polled partitions
+fetchAllPartitions :: Kafka (M.Map TopicName [(Partition, Offset)], Response)
+fetchAllPartitions = do
+  wt <- use (kafkaClientState . stateWaitTime)
+  ws <- use (kafkaClientState . stateWaitSize)
+  bs <- use (kafkaClientState . stateBufferSize)
+  allPartitions <- use (kafkaClientState . statePartitionOffsets)
+  let addBuffer (p, o) = (p, o, bs)
+  let mapBuffers xs = addBuffer <$> xs
+  let includingBuffers = (\t -> (t ^. _1, mapBuffers $ t ^. _2)) <$> M.toList allPartitions
+  resp <- doRequest =<< (makeRequest $ FetchRequest $ FetchReq (ordinaryConsumerId, wt, ws, includingBuffers))
+  return (allPartitions, resp)
 
 -- | Execute a Kafka Request with a given broker
 useBroker :: Broker -> Kafka Request -> Kafka Response
