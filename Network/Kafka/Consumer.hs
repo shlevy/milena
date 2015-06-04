@@ -56,7 +56,7 @@ initializeConsumer strategy timeout topics = do
 -- | Stream from all assigned partitions -> outputs all polled partitions
 fetchAllPartitions :: Kafka Response
 fetchAllPartitions = do
-  -- send heartbeat request
+  _ <- sendHeartbeat
   wt <- use (kafkaClientState . stateWaitTime)
   ws <- use (kafkaClientState . stateWaitSize)
   bs <- use (kafkaClientState . stateBufferSize)
@@ -74,10 +74,20 @@ handleFetchResponse fr = do
   _ <- commitOffsets offsets 0 ""
   return $ join msgs
 
+-- | Split the fetch response message - extracting only if ok
 extractMsgsOffsets :: (TopicName, [(Partition, KafkaError, Offset, MessageSet)])
                    -> ((TopicName, [(Partition, Offset)]), [MessageSet])
 extractMsgsOffsets (topic, xs) = ((topic, offsets), msgs)
   where (offsets, msgs) = unzip $ [ ((x ^. _1, x ^. _3), x ^._4) | x <- xs, x ^. _2 == NoError ]
+
+-- | Send heartbeat request to signify consumer is ok - discard response
+sendHeartbeat :: Kafka ()
+sendHeartbeat = do
+  gp   <- use (kafkaClientState . stateConsumerGroup)
+  ggid <- use (kafkaClientState . stateGroupGenerationId . non 0)
+  cid  <- use (kafkaClientState . stateConsumerId . non "")
+  _ <- doRequest =<< (makeRequest $ HeartbeatRequest $ HeartbeatReq (gp, ggid, cid))
+  return ()
 
 -- | Execute a Kafka Request with a given broker
 useBroker :: Broker -> Kafka Request -> Kafka Response
