@@ -27,6 +27,7 @@ module Network.Kafka.Consumer where
 
 import Control.Arrow ((***))
 import Control.Lens
+import Control.Monad       (join)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Either
 import Data.List           (partition)
@@ -53,8 +54,9 @@ initializeConsumer strategy timeout topics = do
   return ()
 
 -- | Stream from all assigned partitions -> outputs all polled partitions
-fetchAllPartitions :: Kafka (M.Map TopicName [(Partition, Offset)], Response)
+fetchAllPartitions :: Kafka Response
 fetchAllPartitions = do
+  -- send heartbeat request
   wt <- use (kafkaClientState . stateWaitTime)
   ws <- use (kafkaClientState . stateWaitSize)
   bs <- use (kafkaClientState . stateBufferSize)
@@ -62,8 +64,20 @@ fetchAllPartitions = do
   let addBuffer (p, o) = (p, o, bs)
   let mapBuffers xs = addBuffer <$> xs
   let includingBuffers = (\t -> (t ^. _1, mapBuffers $ t ^. _2)) <$> M.toList allPartitions
-  resp <- doRequest =<< (makeRequest $ FetchRequest $ FetchReq (ordinaryConsumerId, wt, ws, includingBuffers))
-  return (allPartitions, resp)
+  doRequest =<< (makeRequest $ FetchRequest $ FetchReq (ordinaryConsumerId, wt, ws, includingBuffers))
+
+-- | Extract the responses from fetch and commit new offsets
+handleFetchResponse :: FetchResponse -> Kafka [MessageSet]
+handleFetchResponse fr = do
+  let resps = fr ^. fetchResponseFields
+  let (offsets, msgs) = unzip $ extractMsgsOffsets <$> resps
+  _ <- commitOffsets offsets 0 ""
+  return $ join msgs
+
+extractMsgsOffsets :: (TopicName, [(Partition, KafkaError, Offset, MessageSet)])
+                   -> ((TopicName, [(Partition, Offset)]), [MessageSet])
+extractMsgsOffsets (topic, xs) = ((topic, offsets), msgs)
+  where (offsets, msgs) = unzip $ [ ((x ^. _1, x ^. _3), x ^._4) | x <- xs, x ^. _2 == NoError ]
 
 -- | Execute a Kafka Request with a given broker
 useBroker :: Broker -> Kafka Request -> Kafka Response
