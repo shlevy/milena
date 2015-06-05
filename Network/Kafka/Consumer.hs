@@ -25,12 +25,13 @@
 
 module Network.Kafka.Consumer where
 
-import Control.Arrow       ((***))
+import Control.Arrow         ((***))
 import Control.Lens
-import Control.Monad       (join)
-import Control.Monad.Trans (lift)
+import Control.Monad         (join)
+import Control.Monad.Trans   (lift, liftIO)
 import Control.Monad.Trans.Either
-import Data.List           (partition)
+import Data.List             (partition)
+import Data.Time.Clock.POSIX (getPOSIXTime)
 import Network.Kafka
 import Network.Kafka.Protocol
 import qualified Data.Map as M
@@ -73,7 +74,8 @@ handleFetchResponse :: FetchResponse -> Kafka [MessageSet]
 handleFetchResponse fr = do
   let resps = fr ^. fetchResponseFields
   let (offsets, msgs) = unzip $ extractMsgsOffsets <$> resps
-  _ <- commitOffsets offsets 0 ""
+  commitTime <- liftIO $ Time . round . (*) 1000000 <$> getPOSIXTime
+  _ <- commitOffsets offsets commitTime "" -- ignore commit response as we always refetch offsets when iterating
   return $ join msgs
 
 -- | Split the fetch response message - extracting only if ok

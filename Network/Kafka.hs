@@ -227,6 +227,9 @@ doRequest' h r = mapStateT (bimapEitherT KafkaDeserializationError id) $ do
   resp <- liftIO $ B.hGet h dataLength
   lift . hoistEither $ runGet (getResponse dataLength) resp
 
+doRequest'' :: Request -> Handle -> Kafka Response
+doRequest'' r h = doRequest' h r
+
 -- | Send a metadata request
 metadata :: MetadataRequest -> Kafka MetadataResponse
 metadata request = do
