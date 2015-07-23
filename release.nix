@@ -1,5 +1,5 @@
-{ nixpkgs ? <nixpkgs>, nixpkgsArgs ? {} }: let
-  pkgs = import nixpkgs nixpkgsArgs;
-in {
-  build = pkgs.haskellPackages.callPackage ./. {};
-}
+{ src
+, nixpkgs ? null
+, bootstrap-nixpkgs
+, nix-composition-lib
+}@args: import (nix-composition-lib + "/hydra.nix") args

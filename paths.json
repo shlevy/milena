@@ -1,0 +1,4 @@
+{ "nixpkgs": { "repo": "NixOS/nixpkgs"
+             , "rev": "e3a4ad0e6b44ab5e33db6528e93c9cfbe7ae670e"
+             }
+}
